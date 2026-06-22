@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self';" />
+  <title>SSH 连接工具</title>
+  <link rel="stylesheet" href="../../node_modules/@xterm/xterm/css/xterm.css" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <!-- 自绘标题栏 -->
+  <div id="titlebar">
+    <div class="tb-drag">
+      <span class="tb-mark">&rsaquo;_</span>
+      <span class="tb-title">SSH Studio</span>
+    </div>
+    <div class="tb-controls">
+      <button id="tb-min" class="tb-btn" title="最小化">&#x2014;</button>
+      <button id="tb-max" class="tb-btn" title="最大化">&#x2610;</button>
+      <button id="tb-close" class="tb-btn tb-close" title="关闭">&#x2715;</button>
+    </div>
+  </div>
+
+  <div id="app">
+    <!-- 侧边栏:已保存主机 -->
+    <aside id="sidebar">
+      <div class="brand">
+        <div class="brand-mark">&rsaquo;_</div>
+        <div class="brand-text">
+          <div class="brand-name">SSH Studio</div>
+          <div class="brand-sub">安全终端 · 连接管理</div>
+        </div>
+      </div>
+      <div class="sidebar-head">
+        <span>我的主机</span>
+        <button id="btn-new" title="新增主机">＋</button>
+      </div>
+      <ul id="host-list"></ul>
+    </aside>
+
+    <!-- 主区域 -->
+    <main id="main">
+      <!-- 标签栏 -->
+      <div id="tabbar"></div>
+
+      <!-- 终端容器 -->
+      <div id="terminals"></div>
+
+      <!-- 底部状态栏 -->
+      <div id="statusbar" class="hidden">
+        <span class="st-item st-state"><span class="st-dot"></span><span class="st-state-text">—</span></span>
+        <span class="st-sep"></span>
+        <button id="open-fm" class="st-btn" title="打开文件管理(SFTP)">📁 文件</button>
+        <button id="open-tunnel" class="st-btn" title="端口转发 / SSH 隧道">🔀 隧道</button>
+        <span class="st-sep"></span>
+        <span class="st-item" title="命令往返响应时间">响应 <b id="st-rtt">—</b></span>
+        <span class="st-item" title="CPU 负载(1 分钟) / 核心数">负载 <b id="st-load">—</b></span>
+        <span class="st-item" title="已用 / 总内存">内存 <b id="st-mem">—</b></span>
+        <span class="st-item" title="根分区使用率">磁盘 <b id="st-disk">—</b></span>
+        <span class="st-item" title="服务器已运行时长">运行 <b id="st-up">—</b></span>
+        <span class="st-grow"></span>
+        <span class="st-item" title="本次连接保持时长">已连接 <b id="st-dur">00:00</b></span>
+        <span class="st-sep"></span>
+        <span class="st-item" title="服务器指标采集频率">采集
+          <select id="st-interval" class="st-select">
+            <option value="2000">2s</option>
+            <option value="5000">5s</option>
+            <option value="10000">10s</option>
+            <option value="30000">30s</option>
+            <option value="0">关闭</option>
+          </select>
+        </span>
+      </div>
+
+      <!-- 空状态 / 欢迎页 -->
+      <div id="welcome">
+        <div class="welcome-mark">&rsaquo;_</div>
+        <h1>SSH Studio</h1>
+        <p>从左侧选择主机连接,或点击 <b>＋</b> 新增一台主机。</p>
+        <div class="welcome-tags">
+          <span>多标签会话</span>
+          <span>实时状态监控</span>
+          <span>SFTP 文件管理</span>
+          <span>断线一键重连</span>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- 主机编辑弹窗 -->
+  <div id="modal" class="hidden">
+    <div class="modal-box">
+      <h2 id="modal-title">新增主机</h2>
+      <form id="host-form">
+        <input type="hidden" id="f-id" />
+        <label>名称<input id="f-name" placeholder="我的服务器" /></label>
+        <div class="row">
+          <label class="grow">主机地址<input id="f-host" placeholder="192.168.1.10 或 example.com" required /></label>
+          <label class="port">端口<input id="f-port" type="number" value="22" /></label>
+        </div>
+        <label>用户名<input id="f-username" placeholder="root" required /></label>
+
+        <div class="auth-tabs">
+          <button type="button" class="auth-tab active" data-auth="password">密码</button>
+          <button type="button" class="auth-tab" data-auth="key">密钥</button>
+        </div>
+
+        <div class="auth-pane" data-pane="password">
+          <label>密码<input id="f-password" type="password" placeholder="留空则连接时询问" /></label>
+        </div>
+
+        <div class="auth-pane hidden" data-pane="key">
+          <label>私钥文件路径
+            <input id="f-keypath" placeholder="C:\Users\you\.ssh\id_rsa" />
+          </label>
+          <label>私钥密码(口令,可选)
+            <input id="f-passphrase" type="password" placeholder="私钥若加密则填写" />
+          </label>
+        </div>
+
+        <div class="modal-actions">
+          <button type="button" id="btn-cancel">取消</button>
+          <button type="submit" id="btn-save">保存</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 连接时密码询问弹窗 -->
+  <div id="ask-modal" class="hidden">
+    <div class="modal-box small">
+      <h2 id="ask-title">请输入密码</h2>
+      <form id="ask-form">
+        <label id="ask-label">密码<input id="ask-input" type="password" autofocus /></label>
+        <div class="modal-actions">
+          <button type="button" id="ask-cancel">取消</button>
+          <button type="submit">确定</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 端口转发 / 隧道 弹窗 -->
+  <div id="tunnel-modal" class="hidden">
+    <div class="modal-box">
+      <h2>端口转发 / SSH 隧道</h2>
+      <div class="tn-form">
+        <select id="tn-type" class="tn-type">
+          <option value="local">本地转发(Local)</option>
+          <option value="dynamic">动态 SOCKS5 代理</option>
+        </select>
+        <div class="tn-fields">
+          <label class="tn-col">本地端口<input id="tn-src" type="number" placeholder="如 8080" /></label>
+          <label class="tn-col tn-dst">目标主机<input id="tn-dhost" placeholder="如 127.0.0.1" /></label>
+          <label class="tn-col tn-dport">目标端口<input id="tn-dport" type="number" placeholder="如 3306" /></label>
+        </div>
+        <button id="tn-add" class="tn-add">＋ 添加</button>
+      </div>
+      <ul id="tn-list" class="tn-list"></ul>
+      <div id="tn-status" class="fm-status"></div>
+      <div class="modal-actions">
+        <button type="button" id="tn-close">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 文件管理(SFTP)弹窗 -->
+  <div id="fm-modal" class="hidden">
+    <div class="fm-box">
+      <div class="fm-head">
+        <button id="fm-up" title="上一级目录">↑</button>
+        <input id="fm-path" spellcheck="false" />
+        <button id="fm-go">转到</button>
+        <button id="fm-refresh" title="刷新">↻</button>
+        <button id="fm-mkdir">＋文件夹</button>
+        <button id="fm-upload">⬆ 上传</button>
+        <button id="fm-close" class="fm-x" title="关闭">✕</button>
+      </div>
+      <div class="fm-list-head">
+        <span class="c-name">名称</span>
+        <span class="c-size">大小</span>
+        <span class="c-time">修改时间</span>
+        <span class="c-act">操作</span>
+      </div>
+      <ul id="fm-list"></ul>
+      <div id="fm-spinner" class="fm-spinner"></div>
+      <div id="fm-status" class="fm-status"></div>
+    </div>
+  </div>
+
+  <script src="../../node_modules/@xterm/xterm/lib/xterm.js"></script>
+  <script src="../../node_modules/@xterm/addon-fit/lib/addon-fit.js"></script>
+  <script src="renderer.js"></script>
+</body>
+</html>

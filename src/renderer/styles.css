@@ -1,0 +1,483 @@
+/* =====================================================================
+   SSH Studio — 高端深色设计系统
+   ===================================================================== */
+* { box-sizing: border-box; }
+
+:root {
+  /* 背景层次 */
+  --bg:        #0b0e16;
+  --surface:   #121622;
+  --surface-2: #171c2b;
+  --panel:     #1b2132;
+  --elevated:  #20273b;
+
+  /* 边框 / 分隔 */
+  --border:        rgba(255, 255, 255, .07);
+  --border-strong: rgba(255, 255, 255, .13);
+
+  /* 文本 */
+  --text:   #e7eaf3;
+  --muted:  #8990a6;
+  --faint:  #5c627a;
+
+  /* 主题色 */
+  --accent:   #6c8cff;
+  --accent-2: #57c9e4;
+  --grad:     linear-gradient(135deg, #6c8cff 0%, #57c9e4 100%);
+  --grad-soft:linear-gradient(135deg, rgba(108,140,255,.18), rgba(87,201,228,.18));
+
+  /* 语义色 */
+  --ok:     #46d6a0;
+  --warn:   #f5c451;
+  --danger: #ff6b8b;
+
+  --shadow:   0 18px 50px -12px rgba(0, 0, 0, .65);
+  --shadow-sm:0 6px 20px -6px rgba(0, 0, 0, .5);
+  --radius:   14px;
+}
+
+html, body {
+  margin: 0;
+  height: 100%;
+  font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  color: var(--text);
+  font-size: 14px;
+  overflow: hidden;
+  background:
+    radial-gradient(1200px 700px at 78% -8%, rgba(108, 140, 255, .10), transparent 60%),
+    radial-gradient(1000px 600px at -5% 110%, rgba(87, 201, 228, .08), transparent 55%),
+    var(--bg);
+}
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,.08); border-radius: 8px; border: 2px solid transparent; background-clip: content-box; }
+::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,.16); background-clip: content-box; }
+
+body { display: flex; flex-direction: column; }
+#app { display: flex; flex: 1; min-height: 0; }
+
+.hidden { display: none !important; }
+
+/* ============================ 自绘标题栏 ============================ */
+#titlebar {
+  height: 38px; flex: none;
+  display: flex; align-items: center; justify-content: space-between;
+  background: linear-gradient(180deg, var(--surface), var(--bg));
+  border-bottom: 1px solid var(--border);
+}
+.tb-drag {
+  flex: 1; height: 100%;
+  display: flex; align-items: center; gap: 9px; padding-left: 14px;
+  -webkit-app-region: drag;            /* 可拖动区域 */
+}
+.tb-mark {
+  font-family: "Cascadia Code", Consolas, monospace;
+  font-weight: 700; font-size: 12px; color: #0b0e16;
+  background: var(--grad); border-radius: 6px;
+  padding: 2px 6px; line-height: 1;
+}
+.tb-title { font-size: 12px; color: var(--muted); letter-spacing: .5px; }
+.tb-controls { display: flex; height: 100%; -webkit-app-region: no-drag; }
+.tb-btn {
+  width: 46px; height: 100%; border: none; background: transparent;
+  color: var(--muted); cursor: pointer; font-size: 13px;
+  display: flex; align-items: center; justify-content: center;
+  transition: background .12s ease, color .12s ease;
+}
+.tb-btn:hover { background: var(--surface-2); color: var(--text); }
+.tb-close:hover { background: #e5414f; color: #fff; }
+
+/* ============================ 侧边栏 ============================ */
+#sidebar {
+  width: 256px; min-width: 256px;
+  background: linear-gradient(180deg, var(--surface) 0%, var(--bg) 100%);
+  border-right: 1px solid var(--border);
+  display: flex; flex-direction: column;
+}
+
+.brand {
+  display: flex; align-items: center; gap: 12px;
+  padding: 18px 18px 16px;
+}
+.brand-mark {
+  width: 40px; height: 40px; flex: none;
+  display: flex; align-items: center; justify-content: center;
+  font-family: "Cascadia Code", Consolas, monospace;
+  font-size: 18px; font-weight: 700; color: #0b0e16;
+  background: var(--grad);
+  border-radius: 11px;
+  box-shadow: 0 6px 18px -4px rgba(108, 140, 255, .55);
+}
+.brand-name { font-size: 15px; font-weight: 700; letter-spacing: .3px; }
+.brand-sub  { font-size: 11px; color: var(--muted); margin-top: 2px; letter-spacing: .2px; }
+
+.sidebar-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 18px 10px;
+  font-size: 11px; font-weight: 600; letter-spacing: 1.4px;
+  text-transform: uppercase; color: var(--faint);
+}
+.sidebar-head button {
+  width: 26px; height: 26px;
+  border: 1px solid var(--border-strong); border-radius: 8px;
+  background: var(--elevated); color: var(--text);
+  font-size: 17px; cursor: pointer; line-height: 1;
+  display: flex; align-items: center; justify-content: center;
+  transition: all .15s ease;
+}
+.sidebar-head button:hover { background: var(--grad); color: #0b0e16; border-color: transparent; transform: translateY(-1px); }
+
+#host-list { list-style: none; margin: 0; padding: 6px 10px; overflow-y: auto; flex: 1; }
+
+.host-item {
+  position: relative;
+  padding: 11px 12px 11px 14px;
+  border-radius: 11px;
+  cursor: pointer;
+  margin-bottom: 5px;
+  border: 1px solid transparent;
+  transition: background .15s ease, border-color .15s ease, transform .08s ease;
+}
+.host-item::before {
+  content: ""; position: absolute; left: 0; top: 12px; bottom: 12px;
+  width: 3px; border-radius: 3px; background: var(--grad);
+  opacity: 0; transition: opacity .15s ease;
+}
+.host-item:hover { background: var(--surface-2); border-color: var(--border); }
+.host-item:hover::before { opacity: 1; }
+.host-item:active { transform: scale(.99); }
+.host-item .name { font-weight: 600; font-size: 13.5px; }
+.host-item .addr { color: var(--muted); font-size: 11.5px; margin-top: 3px; font-family: "Cascadia Code", Consolas, monospace; }
+.host-item .actions { display: none; gap: 8px; margin-top: 8px; }
+.host-item:hover .actions { display: flex; }
+.host-item .actions button {
+  background: var(--elevated); border: 1px solid var(--border);
+  color: var(--muted); border-radius: 6px; font-size: 11px;
+  padding: 3px 10px; cursor: pointer; transition: all .15s ease;
+}
+.host-item .actions button:hover { color: var(--text); border-color: var(--accent); }
+
+/* ============================ 主区域 ============================ */
+#main { flex: 1; display: flex; flex-direction: column; min-width: 0; position: relative; }
+
+#tabbar {
+  display: flex; gap: 6px;
+  padding: 9px 12px 0;
+  background: transparent;
+  overflow-x: auto;
+}
+#tabbar:empty { display: none; }
+.tab {
+  display: flex; align-items: center; gap: 9px;
+  padding: 9px 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 11px 11px 0 0;
+  cursor: pointer; white-space: nowrap;
+  color: var(--muted); font-size: 13px;
+  transition: background .15s ease, color .15s ease;
+}
+.tab:hover { color: var(--text); }
+.tab.active { background: var(--panel); color: var(--text); border-color: var(--border-strong); border-bottom-color: var(--panel); }
+.tab .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--faint); transition: all .2s ease; }
+.tab.connected .dot { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
+.tab.error .dot { background: var(--danger); box-shadow: 0 0 8px var(--danger); }
+.tab .close { border: none; background: none; color: inherit; cursor: pointer; font-size: 14px; opacity: .6; border-radius: 5px; line-height: 1; padding: 2px 4px; }
+.tab .close:hover { color: var(--danger); opacity: 1; }
+
+#terminals {
+  flex: 1; position: relative; min-height: 0;
+  margin: 0 12px;
+  background: var(--panel);
+  border: 1px solid var(--border-strong);
+  border-radius: 0 12px 12px 12px;
+  overflow: hidden;
+}
+.term-pane { position: absolute; inset: 0; padding: 10px 8px 14px 12px; display: none; }
+.term-pane.active { display: block; }
+.term-pane .xterm { height: 100%; }
+
+#welcome {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  text-align: center; gap: 8px;
+}
+#welcome.hidden { display: none; }
+.welcome-mark {
+  width: 76px; height: 76px; margin-bottom: 10px;
+  display: flex; align-items: center; justify-content: center;
+  font-family: "Cascadia Code", Consolas, monospace;
+  font-size: 32px; font-weight: 700; color: #0b0e16;
+  background: var(--grad); border-radius: 20px;
+  box-shadow: 0 16px 40px -10px rgba(108, 140, 255, .55);
+}
+#welcome h1 { margin: 4px 0 2px; font-size: 26px; font-weight: 700; letter-spacing: .5px; }
+#welcome p { color: var(--muted); margin: 0; }
+.welcome-tags { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 18px; max-width: 460px; }
+.welcome-tags span {
+  font-size: 12px; color: var(--muted);
+  padding: 5px 12px; border-radius: 999px;
+  background: var(--grad-soft); border: 1px solid var(--border);
+}
+
+/* 断线重连浮层 */
+.reconnect-overlay {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 16px;
+  background: rgba(11, 14, 22, .78);
+  backdrop-filter: blur(3px);
+  z-index: 5;
+}
+.reconnect-overlay.hidden { display: none; }
+.reconnect-overlay .rc-msg { color: var(--danger); font-size: 13px; max-width: 80%; text-align: center; }
+.reconnect-overlay .rc-btn {
+  padding: 11px 26px; font-size: 14px; font-weight: 600; cursor: pointer;
+  background: var(--grad); color: #0b0e16;
+  border: none; border-radius: 10px;
+  box-shadow: 0 10px 26px -8px rgba(108, 140, 255, .6);
+  transition: transform .12s ease;
+}
+.reconnect-overlay .rc-btn:hover { transform: translateY(-1px); }
+
+/* ============================ 状态栏 ============================ */
+#statusbar {
+  display: flex; align-items: center; flex-wrap: wrap;
+  gap: 14px; row-gap: 8px;
+  padding: 8px 16px;
+  margin: 8px 12px 10px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow-sm);
+  font-size: 12px; color: var(--muted);
+}
+#statusbar.hidden { display: none; }
+#statusbar .st-item { display: inline-flex; align-items: center; gap: 5px; }
+#statusbar .st-item b { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+#statusbar .st-grow { flex: 1 1 auto; min-width: 8px; }
+#statusbar .st-sep { width: 1px; height: 15px; background: var(--border-strong); }
+#statusbar .st-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--faint); margin-right: 2px; transition: all .2s ease; }
+#statusbar.connected .st-dot { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
+#statusbar.connected .st-state-text { color: var(--ok); }
+#statusbar.error .st-dot { background: var(--danger); box-shadow: 0 0 8px var(--danger); }
+#statusbar.error .st-state-text { color: var(--danger); }
+
+/* 阈值告警 */
+#statusbar .warn { color: var(--warn) !important; }
+#statusbar .crit { color: var(--danger) !important; font-weight: 700 !important; }
+
+#statusbar .st-btn {
+  background: var(--elevated); color: var(--text);
+  border: 1px solid var(--border-strong); border-radius: 8px;
+  padding: 4px 12px; font-size: 12px; cursor: pointer; transition: all .15s ease;
+}
+#statusbar .st-btn:hover { border-color: var(--accent); color: var(--accent); }
+#statusbar .st-select {
+  background: var(--elevated); color: var(--text);
+  border: 1px solid var(--border-strong); border-radius: 7px;
+  padding: 2px 6px; font-size: 12px; cursor: pointer;
+}
+
+/* ============================ 通用弹窗 ============================ */
+#modal, #ask-modal, #fm-modal {
+  position: fixed; inset: 0;
+  background: rgba(7, 9, 15, .58);
+  backdrop-filter: blur(6px);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 100;
+  animation: overlay-in .18s ease;
+}
+@keyframes overlay-in { from { opacity: 0; } to { opacity: 1; } }
+
+.modal-box {
+  position: relative;
+  background: linear-gradient(180deg, var(--elevated), var(--panel));
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  padding: 24px;
+  width: 460px; max-width: 92vw;
+  box-shadow: var(--shadow);
+  animation: modal-in .2s cubic-bezier(.2,.7,.3,1);
+}
+.modal-box.small { width: 360px; }
+.modal-box::before {
+  content: ""; position: absolute; left: 24px; right: 24px; top: 0; height: 2px;
+  background: var(--grad); border-radius: 2px; opacity: .85;
+}
+@keyframes modal-in { from { opacity: 0; transform: translateY(8px) scale(.98); } to { opacity: 1; transform: none; } }
+.modal-box h2 { margin: 0 0 18px; font-size: 18px; font-weight: 700; letter-spacing: .3px; }
+
+#host-form label, #ask-form label { display: block; margin-bottom: 13px; font-size: 12px; color: var(--muted); }
+#host-form input, #ask-form input {
+  display: block; width: 100%; margin-top: 6px;
+  padding: 10px 12px;
+  background: var(--bg); border: 1px solid var(--border-strong);
+  border-radius: 9px; color: var(--text); font-size: 14px;
+  transition: border-color .15s ease, box-shadow .15s ease;
+}
+#host-form input::placeholder, #ask-form input::placeholder { color: var(--faint); }
+#host-form input:focus, #ask-form input:focus {
+  outline: none; border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(108, 140, 255, .18);
+}
+
+.row { display: flex; gap: 12px; }
+.row .grow { flex: 1; }
+.row .port { width: 96px; }
+
+.auth-tabs { display: flex; gap: 8px; margin: 6px 0 14px; }
+.auth-tab {
+  flex: 1; padding: 9px; cursor: pointer; font-size: 13px;
+  background: var(--bg); border: 1px solid var(--border-strong);
+  border-radius: 9px; color: var(--muted); transition: all .15s ease;
+}
+.auth-tab:hover { color: var(--text); }
+.auth-tab.active { background: var(--grad); color: #0b0e16; border-color: transparent; font-weight: 600; }
+
+.modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 10px; }
+.modal-actions button {
+  padding: 9px 20px; border-radius: 9px; cursor: pointer; font-size: 13.5px;
+  border: 1px solid var(--border-strong); background: var(--elevated); color: var(--text);
+  transition: all .15s ease;
+}
+.modal-actions button:hover { border-color: var(--accent); }
+#btn-save, #ask-form button[type="submit"] {
+  background: var(--grad); color: #0b0e16; border-color: transparent; font-weight: 600;
+  box-shadow: 0 8px 20px -8px rgba(108, 140, 255, .6);
+}
+#btn-save:hover, #ask-form button[type="submit"]:hover { transform: translateY(-1px); }
+
+/* ============================ 端口转发 / 隧道 ============================ */
+#tunnel-modal {
+  position: fixed; inset: 0;
+  background: rgba(7, 9, 15, .58); backdrop-filter: blur(6px);
+  display: flex; align-items: center; justify-content: center; z-index: 100;
+  animation: overlay-in .18s ease;
+}
+#tunnel-modal .modal-box { width: 560px; }
+.tn-form { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px; margin-bottom: 14px; }
+.tn-type {
+  background: var(--bg); color: var(--text);
+  border: 1px solid var(--border-strong); border-radius: 9px;
+  padding: 9px 10px; font-size: 13px; cursor: pointer;
+}
+.tn-fields { display: flex; gap: 8px; flex: 1; min-width: 220px; }
+.tn-col { display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: var(--muted); flex: 1; }
+.tn-col input {
+  padding: 8px 10px; background: var(--bg);
+  border: 1px solid var(--border-strong); border-radius: 8px;
+  color: var(--text); font-size: 13px; width: 100%;
+}
+.tn-col input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(108,140,255,.18); }
+.tn-add {
+  padding: 9px 16px; cursor: pointer; white-space: nowrap;
+  background: var(--grad); color: #0b0e16; border: none; border-radius: 9px;
+  font-weight: 600; font-size: 13px;
+}
+.tn-add:hover { transform: translateY(-1px); }
+.tn-list { list-style: none; margin: 0 0 12px; padding: 0; max-height: 260px; overflow-y: auto; }
+.tn-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 12px; margin-bottom: 6px;
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: 9px;
+}
+.tn-row .tn-badge {
+  font-size: 11px; padding: 2px 8px; border-radius: 999px;
+  background: var(--grad-soft); border: 1px solid var(--border); color: var(--accent-2);
+  white-space: nowrap;
+}
+.tn-row .tn-desc { flex: 1; font-size: 13px; font-family: "Cascadia Code", Consolas, monospace; }
+.tn-row .tn-del {
+  background: var(--elevated); border: 1px solid var(--border); color: var(--muted);
+  border-radius: 6px; font-size: 12px; padding: 4px 10px; cursor: pointer;
+}
+.tn-row .tn-del:hover { color: var(--danger); border-color: var(--danger); }
+.tn-list:empty::after { content: "暂无隧道"; color: var(--faint); font-size: 12px; display: block; padding: 8px 2px; }
+
+/* ============================ 文件管理(SFTP) ============================ */
+.fm-box {
+  position: relative;
+  background: linear-gradient(180deg, var(--elevated), var(--panel));
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  width: 820px; max-width: 94vw;
+  height: 580px; max-height: 88vh;
+  display: flex; flex-direction: column;
+  overflow: hidden;
+  box-shadow: var(--shadow);
+  animation: modal-in .2s cubic-bezier(.2,.7,.3,1);
+}
+
+/* 加载态:列表变暗、禁用交互,中央 spinner */
+#fm-list { transition: opacity .12s ease; }
+.fm-box.loading #fm-list { opacity: .4; pointer-events: none; }
+.fm-box.loading .fm-head button:not(.fm-x) { opacity: .5; pointer-events: none; }
+.fm-spinner {
+  display: none;
+  position: absolute; top: 50%; left: 50%;
+  width: 32px; height: 32px; margin: -16px 0 0 -16px;
+  border: 3px solid var(--border-strong); border-top-color: var(--accent);
+  border-radius: 50%; animation: fm-spin .7s linear infinite; z-index: 6;
+}
+.fm-box.loading .fm-spinner { display: block; }
+@keyframes fm-spin { to { transform: rotate(360deg); } }
+
+.fm-head {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
+  padding: 13px 14px; border-bottom: 1px solid var(--border);
+}
+.fm-head input { min-width: 180px; }
+.fm-head input {
+  flex: 1; padding: 8px 12px;
+  background: var(--bg); border: 1px solid var(--border-strong);
+  border-radius: 8px; color: var(--text); font-size: 13px;
+  font-family: "Cascadia Code", Consolas, monospace;
+}
+.fm-head input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(108,140,255,.18); }
+.fm-head button {
+  padding: 8px 12px; cursor: pointer; white-space: nowrap;
+  background: var(--elevated); color: var(--text);
+  border: 1px solid var(--border-strong); border-radius: 8px; font-size: 13px;
+  transition: all .15s ease;
+}
+.fm-head button:hover { border-color: var(--accent); color: var(--accent); }
+.fm-head .fm-x { padding: 8px 11px; }
+.fm-head .fm-x:hover { border-color: var(--danger); color: var(--danger); }
+#fm-upload { background: var(--grad); color: #0b0e16; border-color: transparent; font-weight: 600; }
+#fm-upload:hover { color: #0b0e16; transform: translateY(-1px); }
+
+.fm-list-head, .fm-row {
+  display: grid;
+  grid-template-columns: 1fr 110px 170px 150px;
+  align-items: center; gap: 8px;
+  padding: 7px 16px;
+}
+.fm-list-head {
+  color: var(--faint); font-size: 11px; font-weight: 600;
+  letter-spacing: 1px; text-transform: uppercase;
+  border-bottom: 1px solid var(--border);
+}
+#fm-list { list-style: none; margin: 0; padding: 4px 0; overflow-y: auto; flex: 1; }
+.fm-row { border-bottom: 1px solid rgba(255,255,255,.035); font-size: 13px; transition: background .12s ease; }
+.fm-row:hover { background: var(--surface-2); }
+.fm-row .c-name { display: flex; align-items: center; gap: 9px; overflow: hidden; }
+.fm-row .c-name .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fm-row .c-name.dir { color: var(--accent); cursor: pointer; font-weight: 500; }
+.fm-row .c-name.dir:hover .nm { text-decoration: underline; }
+.fm-row .c-size, .fm-row .c-time { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.fm-row .c-act { display: flex; gap: 6px; justify-content: flex-end; }
+.fm-row .c-act button {
+  background: var(--elevated); border: 1px solid var(--border); color: var(--muted);
+  border-radius: 6px; font-size: 11px; padding: 3px 9px; cursor: pointer; transition: all .15s ease;
+}
+.fm-row .c-act button:hover { color: var(--text); border-color: var(--accent); }
+.fm-row .c-act button.del:hover { color: var(--danger); border-color: var(--danger); }
+
+.fm-status {
+  padding: 9px 16px; border-top: 1px solid var(--border);
+  color: var(--muted); font-size: 12px; min-height: 22px;
+  font-family: "Cascadia Code", Consolas, monospace;
+}
+.fm-status.err { color: var(--danger); }
