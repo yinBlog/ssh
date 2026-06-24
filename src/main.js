@@ -171,8 +171,10 @@ function createWindow() {
   });
 
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
-  // 开发模式:自动打开开发者工具
-  mainWindow.webContents.openDevTools();
+  // 仅开发模式(未打包)或显式 DEBUG=1 时自动打开开发者工具
+  if (!app.isPackaged || process.env.DEBUG === '1') {
+    mainWindow.webContents.openDevTools();
+  }
 
   // F12 随时开关开发者工具(注意:终端获焦时按键会先被 xterm 捕获,
   // 可点一下界面非终端区域再按,或直接用菜单 视图→切换开发者工具)
