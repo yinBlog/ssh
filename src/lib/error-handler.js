@@ -1,1 +1,127 @@
-'use strict';\n\n/**\n * 自定义 SSH 错误基类\n */\nclass SSHError extends Error {\n  constructor(message, code = 'SSH_ERROR', details = {}) {\n    super(message);\n    this.name = 'SSHError';\n    this.code = code;\n    this.details = details;\n    this.timestamp = new Date().toISOString();\n  }\n}\n\n/**\n * 网络相关错误\n */\nclass NetworkError extends SSHError {\n  constructor(message, details) {\n    super(message, 'NETWORK_ERROR', details);\n    this.name = 'NetworkError';\n  }\n}\n\n/**\n * 认证相关错误\n */\nclass AuthenticationError extends SSHError {\n  constructor(message, details) {\n    super(message, 'AUTH_ERROR', details);\n    this.name = 'AuthenticationError';\n  }\n}\n\n/**\n * 文件操作相关错误\n */\nclass FileOperationError extends SSHError {\n  constructor(message, details) {\n    super(message, 'FILE_OP_ERROR', details);\n    this.name = 'FileOperationError';\n  }\n}\n\n/**\n * SFTP 相关错误\n */\nclass SFTPError extends SSHError {\n  constructor(message, details) {\n    super(message, 'SFTP_ERROR', details);\n    this.name = 'SFTPError';\n  }\n}\n\n/**\n * 解析 ssh2 错误并转换为自定义错误\n * @param {Error} err - ssh2 原生错误\n * @returns {SSHError}\n */\nfunction parseSSHError(err) {\n  if (!err) return new SSHError('Unknown error occurred');\n\n  const message = err.message || String(err);\n\n  // 网络连接错误\n  if (message.includes('ECONNREFUSED') || message.includes('Connection refused')) {\n    return new NetworkError(\n      '连接被拒绝 - 目标主机可能无法访问或 SSH 服务未运行',\n      {\n        originalMessage: message,\n        suggestions: [\n          '检查主机地址和端口是否正确',\n          '确保目标主机的 SSH 服务已启动',\n          '检查防火墙或安全组是否放行了 SSH 端口'\n        ],\n        timestamp: new Date().toISOString()\n      }\n    );\n  }\n\n  // 连接超时\n  if (message.includes('ETIMEDOUT') || message.includes('timed out')) {\n    return new NetworkError(\n      '连接超时 - 网络可能不稳定或目标无响应',\n      {\n        originalMessage: message,\n        suggestions: [\n          '检查网络连接',\n          '尝试增加超时时间',\n          '检查目标主机是否在线'\n        ],\n        timestamp: new Date().toISOString()\n      }\n    );\n  }\n\n  // 认证失败\n  if (message.includes('All configured authentication methods failed')) {\n    return new AuthenticationError(\n      '所有认证方式均失败 - 请检查凭据',\n      {\n        originalMessage: message,\n        suggestions: [\n          '检查用户名是否正确',\n          '确保密码或私钥无误',\n          '如使用私钥，确认 passphrase(口令)正确'\n        ],\n        timestamp: new Date().toISOString()\n      }\n    );\n  }\n\n  // 权限错误\n  if (message.includes('Permission denied')) {\n    return new AuthenticationError(\n      '权限被拒绝 - 无效的私钥或密码',\n      {\n        originalMessage: message,\n        suggestions: [\n          '核对登录凭证',\n          '如使用私钥，确认格式正确',\n          '检查私钥文件权限(通常需要 600)'\n        ],\n        timestamp: new Date().toISOString()\n      }\n    );\n  }\n\n  // 私钥格式错误\n  if (message.includes('Unsupported key format') || message.includes('Invalid key')) {\n    return new AuthenticationError(\n      '私钥格式不支持或损坏',\n      {\n        originalMessage: message,\n        suggestions: [\n          '确保私钥为 PEM 或 OpenSSH 格式',\n          '尝试用 ssh-keygen 转换格式',\n          '检查私钥文件是否完整'\n        ],\n        timestamp: new Date().toISOString()\n      }\n    );\n  }\n\n  // SFTP 错误\n  if (message.includes('SFTP') || message.includes('sftp')) {\n    return new SFTPError(\n      '文件传输出错',\n      {\n        originalMessage: message,\n        timestamp: new Date().toISOString()\n      }\n    );\n  }\n\n  // 文件操作错误\n  if (message.includes('No such file') || message.includes('ENOENT')) {\n    return new FileOperationError(\n      '文件不存在',\n      {\n        originalMessage: message,\n        timestamp: new Date().toISOString()\n      }\n    );\n  }\n\n  if (message.includes('Permission denied') && message.includes('file')) {\n    return new FileOperationError(\n      '文件权限不足',\n      {\n        originalMessage: message,\n        timestamp: new Date().toISOString()\n      }\n    );\n  }\n\n  // 通用 SSH 错误\n  return new SSHError(message, 'SSH_ERROR', {\n    timestamp: new Date().toISOString()\n  });\n}\n\n/**\n * 用户友好的错误消息\n */\nfunction getUserFriendlyMessage(error) {\n  if (error instanceof NetworkError) {\n    return `网络错误: ${error.message}\\n\\n建议: ${error.details.suggestions?.join('; ')}`;\n  }\n\n  if (error instanceof AuthenticationError) {\n    return `认证失败: ${error.message}\\n\\n建议: ${error.details.suggestions?.join('; ')}`;\n  }\n\n  if (error instanceof FileOperationError) {\n    return `文件操作失败: ${error.message}`;\n  }\n\n  if (error instanceof SFTPError) {\n    return `SFTP 错误: ${error.message}`;\n  }\n\n  return error.message || '发生未知错误';\n}\n\nmodule.exports = {\n  SSHError,\n  NetworkError,\n  AuthenticationError,\n  FileOperationError,\n  SFTPError,\n  parseSSHError,\n  getUserFriendlyMessage\n};\n"
+'use strict';
+
+/** 自定义 SSH 错误基类 */
+class SSHError extends Error {
+  constructor(message, code = 'SSH_ERROR', details = {}) {
+    super(message);
+    this.name = 'SSHError';
+    this.code = code;
+    this.details = details;
+    this.timestamp = new Date().toISOString();
+  }
+}
+
+/** 网络相关错误 */
+class NetworkError extends SSHError {
+  constructor(message, details) {
+    super(message, 'NETWORK_ERROR', details);
+    this.name = 'NetworkError';
+  }
+}
+
+/** 认证相关错误 */
+class AuthenticationError extends SSHError {
+  constructor(message, details) {
+    super(message, 'AUTH_ERROR', details);
+    this.name = 'AuthenticationError';
+  }
+}
+
+/** 文件操作相关错误 */
+class FileOperationError extends SSHError {
+  constructor(message, details) {
+    super(message, 'FILE_OP_ERROR', details);
+    this.name = 'FileOperationError';
+  }
+}
+
+/** SFTP 相关错误 */
+class SFTPError extends SSHError {
+  constructor(message, details) {
+    super(message, 'SFTP_ERROR', details);
+    this.name = 'SFTPError';
+  }
+}
+
+/**
+ * 解析 ssh2 / 系统原生错误并转换为带建议的自定义错误
+ * @param {Error|string} err
+ * @returns {SSHError}
+ */
+function parseSSHError(err) {
+  if (!err) return new SSHError('发生未知错误');
+
+  const message = err.message || String(err);
+  const stamp = () => new Date().toISOString();
+
+  if (message.includes('ECONNREFUSED') || message.includes('Connection refused')) {
+    return new NetworkError('连接被拒绝 —— 目标主机不可达或 SSH 服务未运行', {
+      originalMessage: message,
+      suggestions: ['检查主机地址和端口是否正确', '确认目标主机的 SSH 服务已启动', '检查防火墙 / 云安全组是否放行 SSH 端口'],
+      timestamp: stamp(),
+    });
+  }
+
+  if (message.includes('ETIMEDOUT') || message.includes('timed out') || message.includes('before handshake')) {
+    return new NetworkError('连接超时 / 握手前断开 —— 网络不稳定或被中途切断', {
+      originalMessage: message,
+      suggestions: ['检查网络连通性', '确认端口确实是 SSH 服务', '检查中间防火墙 / 代理'],
+      timestamp: stamp(),
+    });
+  }
+
+  if (message.includes('All configured authentication methods failed')) {
+    return new AuthenticationError('所有认证方式均失败 —— 请检查凭据', {
+      originalMessage: message,
+      suggestions: ['检查用户名是否正确', '确认密码或私钥无误', '若用私钥,确认 passphrase(口令)正确'],
+      timestamp: stamp(),
+    });
+  }
+
+  if (message.includes('Unsupported key format') || message.includes('Cannot parse privateKey') || message.includes('Invalid key')) {
+    return new AuthenticationError('私钥格式不支持或已损坏', {
+      originalMessage: message,
+      suggestions: ['确保私钥为 PEM 或 OpenSSH 格式', '尝试用 ssh-keygen 转换格式', '检查私钥文件是否完整'],
+      timestamp: stamp(),
+    });
+  }
+
+  if (message.includes('Permission denied')) {
+    return new AuthenticationError('权限被拒绝 —— 无效的私钥或密码', {
+      originalMessage: message,
+      suggestions: ['核对登录凭证', '若用私钥,确认格式与对应公钥已部署', '检查私钥文件权限(通常需 600)'],
+      timestamp: stamp(),
+    });
+  }
+
+  if (message.includes('No such file') || message.includes('ENOENT')) {
+    return new FileOperationError('文件或目录不存在', { originalMessage: message, timestamp: stamp() });
+  }
+
+  if (message.includes('SFTP') || message.includes('sftp')) {
+    return new SFTPError('文件传输出错', { originalMessage: message, timestamp: stamp() });
+  }
+
+  return new SSHError(message, 'SSH_ERROR', { timestamp: stamp() });
+}
+
+/**
+ * 生成面向用户的友好提示(含建议)
+ * @param {Error} error
+ * @returns {string}
+ */
+function getUserFriendlyMessage(error) {
+  const e = error instanceof SSHError ? error : parseSSHError(error);
+  const tip = e.details && e.details.suggestions ? `\n建议:${e.details.suggestions.join(';')}` : '';
+  return `${e.message}${tip}`;
+}
+
+module.exports = {
+  SSHError,
+  NetworkError,
+  AuthenticationError,
+  FileOperationError,
+  SFTPError,
+  parseSSHError,
+  getUserFriendlyMessage,
+};

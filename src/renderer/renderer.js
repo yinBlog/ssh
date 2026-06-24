@@ -112,9 +112,13 @@ form.addEventListener('submit', async (e) => {
     privateKeyPath: document.getElementById('f-keypath').value.trim(),
     passphrase: document.getElementById('f-passphrase').value,
   };
-  await api.saveHost(host);
-  closeModal();
-  refreshHosts();
+  try {
+    await api.saveHost(host);
+    closeModal();
+    refreshHosts();
+  } catch (err) {
+    alert(`保存失败:\n${cleanErr(err)}`);
+  }
 });
 
 // ---------------------------------------------------------------------------

@@ -6,6 +6,9 @@ const fs = require('fs');
 const net = require('net');
 const crypto = require('crypto');
 const { Client } = require('ssh2');
+const logger = require('./lib/logger');
+const { validateHostConfig, validateTunnelConfig } = require('./lib/validators');
+const { parseSSHError, getUserFriendlyMessage } = require('./lib/error-handler');
 
 // ---------------------------------------------------------------------------
 // 连接前 TCP 预检:先确认目标 host:port 可达,避免把网络问题
@@ -217,6 +220,11 @@ app.on('window-all-closed', () => {
 ipcMain.handle('hosts:list', () => loadHosts());
 
 ipcMain.handle('hosts:save', (_e, host) => {
+  const v = validateHostConfig(host);
+  if (!v.valid) {
+    logger.warn('主机配置校验失败', { errors: v.errors });
+    throw new Error(v.errors.join(';'));
+  }
   const hosts = loadHosts();
   if (host.id) {
     const idx = hosts.findIndex((h) => h.id === host.id);
@@ -261,10 +269,12 @@ function send(channel, payload) {
 ipcMain.handle('ssh:connect', async (_e, cfg) => {
   const sessionId = `s_${++sessionSeq}`;
   const port = Number(cfg.port) || 22;
+  logger.log('SSH 连接发起', { sessionId, host: cfg.host, port, username: cfg.username });
 
   // 连接前 TCP 预检
   const probe = await tcpProbe(cfg.host, port);
   if (!probe.ok) {
+    logger.warn('TCP 预检失败', { host: cfg.host, port, err: probe.err });
     setImmediate(() =>
       send('ssh:status', {
         sessionId,
@@ -309,6 +319,7 @@ ipcMain.handle('ssh:connect', async (_e, cfg) => {
       if (cfg.passphrase) auth.passphrase = cfg.passphrase;
     } catch (err) {
       // 读取私钥失败,稍后立即报错
+      logger.error('读取私钥失败', err);
       setImmediate(() =>
         send('ssh:status', { sessionId, status: 'error', message: `读取私钥失败: ${err.message}` })
       );
@@ -326,6 +337,7 @@ ipcMain.handle('ssh:connect', async (_e, cfg) => {
   }
 
   conn.on('ready', () => {
+    logger.log('SSH 已连接', { sessionId, host: cfg.host, port, username: cfg.username });
     send('ssh:status', { sessionId, status: 'connected', message: '连接成功' });
     conn.shell({ term: 'xterm-256color', cols: cfg.cols || 80, rows: cfg.rows || 24 }, (err, stream) => {
       if (err) {
@@ -360,6 +372,7 @@ ipcMain.handle('ssh:connect', async (_e, cfg) => {
       stream.on('close', () => {
         clearInterval(statsTimer);
         closeTunnels(sessions.get(sessionId));
+        logger.log('SSH 会话关闭', { sessionId });
         send('ssh:status', { sessionId, status: 'closed', message: '会话已关闭' });
         try { conn.end(); } catch { /* ignore */ }
         sessions.delete(sessionId);
@@ -368,7 +381,9 @@ ipcMain.handle('ssh:connect', async (_e, cfg) => {
   });
 
   conn.on('error', (err) => {
-    send('ssh:status', { sessionId, status: 'error', message: err.message });
+    const friendly = getUserFriendlyMessage(parseSSHError(err));
+    logger.error('SSH 连接错误', err);
+    send('ssh:status', { sessionId, status: 'error', message: friendly });
     sessions.delete(sessionId);
   });
 
@@ -454,6 +469,8 @@ ipcMain.handle('tunnel:list', (_e, { sessionId }) => {
 ipcMain.handle('tunnel:add', async (_e, { sessionId, type, srcPort, dstHost, dstPort }) => {
   const s = sessions.get(sessionId);
   if (!s) throw new Error('会话不存在或已断开');
+  const v = validateTunnelConfig({ type, srcPort, dstHost, dstPort });
+  if (!v.valid) throw new Error(v.errors.join(';'));
   const t = { id: `tn_${++tunnelSeq}`, type, srcPort: Number(srcPort), dstHost, dstPort: Number(dstPort), server: null };
 
   await new Promise((resolve, reject) => {
@@ -472,6 +489,7 @@ ipcMain.handle('tunnel:add', async (_e, { sessionId, type, srcPort, dstHost, dst
   });
 
   s.tunnels.set(t.id, t);
+  logger.log('隧道已建立', { type: t.type, srcPort: t.srcPort, dstHost: t.dstHost, dstPort: t.dstPort });
   return { ok: true, id: t.id };
 });
 

@@ -1,1 +1,64 @@
-'use strict';\n\nconst fs = require('fs');\nconst path = require('path');\nconst { app } = require('electron');\n\nclass Logger {\n  constructor() {\n    this.logsDir = path.join(app.getPath('userData'), 'logs');\n    this.ensureLogsDir();\n    this.logFile = path.join(this.logsDir, `app-${new Date().toISOString().split('T')[0]}.log`);\n  }\n\n  ensureLogsDir() {\n    if (!fs.existsSync(this.logsDir)) {\n      fs.mkdirSync(this.logsDir, { recursive: true });\n    }\n  }\n\n  format(level, message, data = null) {\n    const timestamp = new Date().toISOString();\n    const logEntry = {\n      timestamp,\n      level,\n      message,\n      ...(data && { data })\n    };\n    return JSON.stringify(logEntry);\n  }\n\n  writeLog(logEntry) {\n    try {\n      fs.appendFileSync(this.logFile, logEntry + '\\n');\n    } catch (err) {\n      console.error('Failed to write log:', err);\n    }\n  }\n\n  log(message, data) {\n    const entry = this.format('INFO', message, data);\n    console.log(`[INFO] ${message}`, data || '');\n    this.writeLog(entry);\n  }\n\n  warn(message, data) {\n    const entry = this.format('WARN', message, data);\n    console.warn(`[WARN] ${message}`, data || '');\n    this.writeLog(entry);\n  }\n\n  error(message, error) {\n    const data = error instanceof Error ? {\n      message: error.message,\n      stack: error.stack\n    } : error;\n    const entry = this.format('ERROR', message, data);\n    console.error(`[ERROR] ${message}`, data || '');\n    this.writeLog(entry);\n  }\n\n  debug(message, data) {\n    const entry = this.format('DEBUG', message, data);\n    console.log(`[DEBUG] ${message}`, data || '');\n    this.writeLog(entry);\n  }\n}\n\nmodule.exports = new Logger();\n"
+'use strict';
+
+const fs = require('fs');
+const path = require('path');
+const { app } = require('electron');
+
+class Logger {
+  constructor() {
+    this.ready = false;
+  }
+
+  // 延迟初始化:首次写日志时再解析路径,避免在 app ready 前访问 userData
+  init() {
+    if (this.ready) return;
+    try {
+      this.logsDir = path.join(app.getPath('userData'), 'logs');
+      if (!fs.existsSync(this.logsDir)) fs.mkdirSync(this.logsDir, { recursive: true });
+      const day = new Date().toISOString().split('T')[0];
+      this.logFile = path.join(this.logsDir, `app-${day}.log`);
+      this.ready = true;
+    } catch {
+      /* 文件日志不可用时,仅控制台输出 */
+    }
+  }
+
+  format(level, message, data) {
+    return JSON.stringify({
+      timestamp: new Date().toISOString(),
+      level,
+      message,
+      ...(data ? { data } : {}),
+    });
+  }
+
+  writeLog(entry) {
+    this.init();
+    if (!this.logFile) return;
+    try { fs.appendFileSync(this.logFile, `${entry}\n`); }
+    catch (err) { console.error('Failed to write log:', err); }
+  }
+
+  log(message, data) {
+    console.log(`[INFO] ${message}`, data || '');
+    this.writeLog(this.format('INFO', message, data));
+  }
+
+  warn(message, data) {
+    console.warn(`[WARN] ${message}`, data || '');
+    this.writeLog(this.format('WARN', message, data));
+  }
+
+  error(message, error) {
+    const data = error instanceof Error ? { message: error.message, stack: error.stack } : error;
+    console.error(`[ERROR] ${message}`, data || '');
+    this.writeLog(this.format('ERROR', message, data));
+  }
+
+  debug(message, data) {
+    console.log(`[DEBUG] ${message}`, data || '');
+    this.writeLog(this.format('DEBUG', message, data));
+  }
+}
+
+module.exports = new Logger();
