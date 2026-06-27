@@ -18,6 +18,15 @@ contextBridge.exposeInMainWorld('sshBridge', {
   tunnelAdd: (cfg) => ipcRenderer.invoke('tunnel:add', cfg),
   tunnelRemove: (sessionId, id) => ipcRenderer.invoke('tunnel:remove', { sessionId, id }),
 
+  // 资源监控看板:按需采集一次富指标
+  monitorSnapshot: (sessionId) => ipcRenderer.invoke('monitor:snapshot', { sessionId }),
+
+  // 实时远程日志(tail -F)
+  logStart: (sessionId, path, lines) => ipcRenderer.invoke('log:start', { sessionId, path, lines }),
+  logStop: (sessionId, logId) => ipcRenderer.invoke('log:stop', { sessionId, logId }),
+  onLogData: (cb) => ipcRenderer.on('log:data', (_e, payload) => cb(payload)),
+  onLogEnd: (cb) => ipcRenderer.on('log:end', (_e, payload) => cb(payload)),
+
   // SFTP 文件管理
   sftpList: (sessionId, dir) => ipcRenderer.invoke('sftp:list', { sessionId, dir }),
   sftpDownload: (sessionId, remotePath, name) => ipcRenderer.invoke('sftp:download', { sessionId, remotePath, name }),
@@ -41,6 +50,9 @@ contextBridge.exposeInMainWorld('sshBridge', {
   // 系统剪贴板(终端复制/粘贴)
   clipboardWrite: (text) => clipboard.writeText(text || ''),
   clipboardRead: () => clipboard.readText(),
+
+  // 桌面通知(阈值告警)
+  notify: (title, body) => ipcRenderer.send('app:notify', { title, body }),
 
   // 主进程 -> 渲染进程的事件
   onOutput: (cb) => ipcRenderer.on('ssh:output', (_e, payload) => cb(payload)),

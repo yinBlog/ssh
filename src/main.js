@@ -1,6 +1,6 @@
 'use strict';
 
-const { app, BrowserWindow, ipcMain, dialog, safeStorage } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, safeStorage, Notification } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const net = require('net');
@@ -64,14 +64,31 @@ function decField(v) {
 function loadHosts() {
   try {
     const arr = JSON.parse(fs.readFileSync(hostsFile(), 'utf8'));
-    return arr.map((h) => ({ ...h, password: decField(h.password), passphrase: decField(h.passphrase) }));
+    return arr.map((h) => ({
+      ...h,
+      password: decField(h.password),
+      passphrase: decField(h.passphrase),
+      // 跳板机凭据同样解密
+      jump: h.jump && h.jump.host
+        ? { ...h.jump, password: decField(h.jump.password), passphrase: decField(h.jump.passphrase) }
+        : undefined,
+    }));
   } catch {
     return [];
   }
 }
 
 function saveHosts(hosts) {
-  const enc = hosts.map((h) => ({ ...h, password: encField(h.password), passphrase: encField(h.passphrase) }));
+  const enc = hosts.map((h) => {
+    const out = { ...h, password: encField(h.password), passphrase: encField(h.passphrase) };
+    // 仅在启用(填了跳板地址)时持久化跳板配置,凭据加密
+    if (h.jump && h.jump.host) {
+      out.jump = { ...h.jump, password: encField(h.jump.password), passphrase: encField(h.jump.passphrase) };
+    } else {
+      delete out.jump;
+    }
+    return out;
+  });
   fs.writeFileSync(hostsFile(), JSON.stringify(enc, null, 2), 'utf8');
 }
 
@@ -115,6 +132,32 @@ const STAT_CMD =
   "DISK=$(df -P / 2>/dev/null | awk 'NR==2{print $5}'); " +
   "UP=$(awk '{print int($1)}' /proc/uptime 2>/dev/null); " +
   "printf 'S|%s|%s|%s|%s|%s\\n' \"$LOAD\" \"$CORES\" \"$MEM\" \"$DISK\" \"$UP\"";
+
+// 资源监控看板用的「富指标」一次性采集脚本(Linux)。输出分段文本,
+// 由渲染进程解析。CPU 使用率与网络速率用「相邻两次快照差值」在前端计算,
+// 因此这里只给原始累计值(/proc/stat 的 total/idle、/proc/net/dev 的 rx/tx)。
+const DASH_CMD = [
+  "echo '==CPU=='",
+  "awk '/^cpu /{idle=$5+$6; tot=0; for(i=2;i<=NF;i++)tot+=$i; print tot\" \"idle}' /proc/stat 2>/dev/null",
+  "nproc 2>/dev/null",
+  "awk '{print $1\" \"$2\" \"$3}' /proc/loadavg 2>/dev/null",
+  "echo '==MEM=='",
+  "free -m 2>/dev/null | awk 'NR==2{print $3\"|\"$2} NR==3{print $3\"|\"$2}'",
+  "echo '==DISK=='",
+  "df -P -h -x tmpfs -x devtmpfs -x overlay 2>/dev/null | awk 'NR>1{print $5\" \"$3\" \"$2\" \"$6}'",
+  "echo '==NET=='",
+  "sed 's/:/ /' /proc/net/dev 2>/dev/null | awk 'NR>2 && $1!=\"lo\"{rx+=$2; tx+=$10} END{print rx\"|\"tx}'",
+  "echo '==PROC=='",
+  "ps -eo pid,pcpu,pmem,comm --sort=-pcpu 2>/dev/null | awk 'NR>1 && NR<=9{print $1\" \"$2\" \"$3\" \"$4}'",
+  "echo '==UP=='",
+  "awk '{print int($1)}' /proc/uptime 2>/dev/null",
+  "echo '==END=='",
+].join('; ');
+
+// 把任意路径安全包进单引号(转义内部单引号),用于拼接远端 shell 命令
+function shQuote(p) {
+  return `'${String(p).replace(/'/g, `'\\''`)}'`;
+}
 
 // ---------------------------------------------------------------------------
 // 应用设置(settings.json):目前包含指标采集间隔(毫秒,0 = 关闭)
@@ -199,6 +242,17 @@ ipcMain.on('win:maximize', () => {
 });
 ipcMain.on('win:close', () => mainWindow && mainWindow.close());
 
+// 阈值告警等的桌面通知(由渲染进程在指标越界时触发)
+ipcMain.on('app:notify', (_e, { title, body }) => {
+  try {
+    if (Notification.isSupported()) {
+      const n = new Notification({ title: title || 'SSH Studio', body: body || '' });
+      n.on('click', () => { if (mainWindow && !mainWindow.isDestroyed()) { mainWindow.show(); mainWindow.focus(); } });
+      n.show();
+    }
+  } catch { /* ignore */ }
+});
+
 app.whenReady().then(() => {
   statsIntervalMs = loadSettings().statsInterval || 5000;
   createWindow();
@@ -208,9 +262,10 @@ app.whenReady().then(() => {
 });
 
 app.on('window-all-closed', () => {
-  // 关闭所有 SSH 会话
-  for (const { conn } of sessions.values()) {
+  // 关闭所有 SSH 会话(含跳板机连接)
+  for (const { conn, jumpConn } of sessions.values()) {
     try { conn.end(); } catch { /* ignore */ }
+    try { if (jumpConn) jumpConn.end(); } catch { /* ignore */ }
   }
   sessions.clear();
   if (process.platform !== 'darwin') app.quit();
@@ -268,67 +323,74 @@ function send(channel, payload) {
   }
 }
 
+// 为某个端点(目标主机或跳板机)构造 ssh2 连接参数。包含心跳与 TOFU 指纹校验。
+// 读取私钥失败会抛出,由调用方捕获并提示。
+function buildAuth(ep, sessionId) {
+  const port = Number(ep.port) || 22;
+  const auth = {
+    host: ep.host,
+    port,
+    username: ep.username,
+    readyTimeout: 20000,
+    keepaliveInterval: 15000,
+    keepaliveCountMax: 3, // 心跳:连续 3 次无响应(~45s)判定掉线 -> 触发自动重连
+    hostVerifier: (key, verify) => {
+      const fp = fingerprintOf(key);
+      const hostId = `${ep.host}:${port}`;
+      const known = loadKnownHosts();
+      if (known[hostId] === fp) return verify(true);
+      askHostKey({ sessionId, hostId, fingerprint: fp, type: known[hostId] ? 'changed' : 'new' })
+        .then((accept) => {
+          if (accept) { known[hostId] = fp; saveKnownHosts(known); verify(true); }
+          else verify(false);
+        });
+    },
+  };
+  if (ep.privateKeyPath) {
+    auth.privateKey = fs.readFileSync(ep.privateKeyPath);
+    if (ep.passphrase) auth.passphrase = ep.passphrase;
+  }
+  if (ep.password) auth.password = ep.password;
+  return auth;
+}
+
 ipcMain.handle('ssh:connect', async (_e, cfg) => {
   const sessionId = `s_${++sessionSeq}`;
   const port = Number(cfg.port) || 22;
-  logger.log('SSH 连接发起', { sessionId, host: cfg.host, port, username: cfg.username });
+  const useJump = !!(cfg.jump && cfg.jump.host);
+  logger.log('SSH 连接发起', { sessionId, host: cfg.host, port, username: cfg.username, viaJump: useJump ? cfg.jump.host : null });
 
-  // 连接前 TCP 预检
-  const probe = await tcpProbe(cfg.host, port);
+  // 连接前 TCP 预检:有跳板机时改测跳板机(目标通常不可直达)
+  const probeHost = useJump ? cfg.jump.host : cfg.host;
+  const probePort = useJump ? (Number(cfg.jump.port) || 22) : port;
+  const probe = await tcpProbe(probeHost, probePort);
   if (!probe.ok) {
-    logger.warn('TCP 预检失败', { host: cfg.host, port, err: probe.err });
+    logger.warn('TCP 预检失败', { host: probeHost, port: probePort, err: probe.err });
+    const what = useJump ? `跳板机 ${probeHost}:${probePort}` : `${probeHost}:${probePort}`;
     setImmediate(() =>
       send('ssh:status', {
         sessionId,
         status: 'error',
-        message: `无法连接到 ${cfg.host}:${port} —— ${probe.err}。请检查地址/端口是否正确、目标是否开机、以及防火墙或云安全组是否放行。`,
+        message: `无法连接到 ${what} —— ${probe.err}。请检查地址/端口是否正确、目标是否开机、以及防火墙或云安全组是否放行。`,
       })
     );
     return { sessionId };
   }
 
   const conn = new Client();
+  let jumpConn = null; // 跳板机连接(若启用),随会话一起清理
 
-  const auth = {
-    host: cfg.host,
-    port,
-    username: cfg.username,
-    readyTimeout: 20000,
-    keepaliveInterval: 15000,
-    // 主机指纹校验(TOFU):首次记录,变更时弹窗警告
-    hostVerifier: (key, verify) => {
-      const fp = fingerprintOf(key);
-      const hostId = `${cfg.host}:${port}`;
-      const known = loadKnownHosts();
-      if (known[hostId] === fp) return verify(true);
-      askHostKey({ sessionId, hostId, fingerprint: fp, type: known[hostId] ? 'changed' : 'new' })
-        .then((accept) => {
-          if (accept) {
-            known[hostId] = fp;
-            saveKnownHosts(known);
-            verify(true);
-          } else {
-            verify(false);
-          }
-        });
-    },
-  };
-
-  // 认证方式:密钥优先,其次密码;两者可同时提供
-  if (cfg.privateKeyPath) {
-    try {
-      auth.privateKey = fs.readFileSync(cfg.privateKeyPath);
-      if (cfg.passphrase) auth.passphrase = cfg.passphrase;
-    } catch (err) {
-      // 读取私钥失败,稍后立即报错
-      logger.error('读取私钥失败', err);
-      setImmediate(() =>
-        send('ssh:status', { sessionId, status: 'error', message: `读取私钥失败: ${err.message}` })
-      );
-      return { sessionId };
-    }
+  // 构造目标认证参数(读取私钥失败立即报错)
+  let auth;
+  try {
+    auth = buildAuth({ ...cfg, port }, sessionId);
+  } catch (err) {
+    logger.error('读取私钥失败', err);
+    setImmediate(() =>
+      send('ssh:status', { sessionId, status: 'error', message: `读取私钥失败: ${err.message}` })
+    );
+    return { sessionId };
   }
-  if (cfg.password) auth.password = cfg.password;
 
   // 支持需要 keyboard-interactive 的服务器(用密码应答)
   if (cfg.password) {
@@ -367,16 +429,18 @@ ipcMain.handle('ssh:connect', async (_e, cfg) => {
       const statsTimer = statsIntervalMs > 0 ? setInterval(pollStats, statsIntervalMs) : null;
       setTimeout(pollStats, 400); // 连上后立刻来一次(即使采集关闭也给一次快照)
 
-      sessions.set(sessionId, { conn, stream, statsTimer, pollStats, tunnels: new Map() });
+      sessions.set(sessionId, { conn, jumpConn, stream, statsTimer, pollStats, tunnels: new Map(), logs: new Map() });
 
       stream.on('data', (data) => send('ssh:output', { sessionId, data: data.toString('utf8') }));
       stream.stderr.on('data', (data) => send('ssh:output', { sessionId, data: data.toString('utf8') }));
       stream.on('close', () => {
         clearInterval(statsTimer);
         closeTunnels(sessions.get(sessionId));
+        closeLogs(sessions.get(sessionId));
         logger.log('SSH 会话关闭', { sessionId });
         send('ssh:status', { sessionId, status: 'closed', message: '会话已关闭' });
         try { conn.end(); } catch { /* ignore */ }
+        try { if (jumpConn) jumpConn.end(); } catch { /* ignore */ }
         sessions.delete(sessionId);
       });
     });
@@ -386,17 +450,63 @@ ipcMain.handle('ssh:connect', async (_e, cfg) => {
     const friendly = getUserFriendlyMessage(parseSSHError(err));
     logger.error('SSH 连接错误', err);
     send('ssh:status', { sessionId, status: 'error', message: friendly });
+    try { if (jumpConn) jumpConn.end(); } catch { /* ignore */ }
     sessions.delete(sessionId);
   });
 
   conn.on('end', () => send('ssh:status', { sessionId, status: 'closed', message: '连接结束' }));
 
+  // 实际发起连接:无跳板直连;有跳板先连 bastion,再经其 forwardOut 到目标
+  const connectTarget = (sock) => {
+    if (sock) auth.sock = sock;
+    try {
+      conn.connect(auth);
+    } catch (err) {
+      setImmediate(() => send('ssh:status', { sessionId, status: 'error', message: err.message }));
+    }
+  };
+
+  if (!useJump) {
+    connectTarget(null);
+    return { sessionId };
+  }
+
+  // ---- 跳板机(ProxyJump)----
+  jumpConn = new Client();
+  let jumpAuth;
   try {
-    conn.connect(auth);
+    jumpAuth = buildAuth(cfg.jump, sessionId);
   } catch (err) {
     setImmediate(() =>
-      send('ssh:status', { sessionId, status: 'error', message: err.message })
+      send('ssh:status', { sessionId, status: 'error', message: `读取跳板机私钥失败: ${err.message}` })
     );
+    return { sessionId };
+  }
+  if (cfg.jump.password) {
+    jumpAuth.tryKeyboard = true;
+    jumpConn.on('keyboard-interactive', (_n, _i, _l, _p, finish) => finish([cfg.jump.password]));
+  }
+  jumpConn.on('ready', () => {
+    logger.log('跳板机已连接', { sessionId, jump: cfg.jump.host });
+    jumpConn.forwardOut('127.0.0.1', 0, cfg.host, port, (err, stream) => {
+      if (err) {
+        send('ssh:status', { sessionId, status: 'error', message: `跳板机无法连通目标 ${cfg.host}:${port}: ${err.message}` });
+        try { jumpConn.end(); } catch { /* ignore */ }
+        return;
+      }
+      connectTarget(stream);
+    });
+  });
+  jumpConn.on('error', (err) => {
+    const friendly = getUserFriendlyMessage(parseSSHError(err));
+    logger.error('跳板机连接错误', err);
+    send('ssh:status', { sessionId, status: 'error', message: `跳板机连接失败:${friendly}` });
+    sessions.delete(sessionId);
+  });
+  try {
+    jumpConn.connect(jumpAuth);
+  } catch (err) {
+    setImmediate(() => send('ssh:status', { sessionId, status: 'error', message: `跳板机连接失败:${err.message}` }));
   }
 
   return { sessionId };
@@ -419,7 +529,9 @@ ipcMain.on('ssh:disconnect', (_e, { sessionId }) => {
   if (s) {
     if (s.statsTimer) clearInterval(s.statsTimer);
     closeTunnels(s);
+    closeLogs(s);
     try { s.conn.end(); } catch { /* ignore */ }
+    try { if (s.jumpConn) s.jumpConn.end(); } catch { /* ignore */ }
     sessions.delete(sessionId);
   }
 });
@@ -435,6 +547,16 @@ function closeTunnels(s) {
     if (t.server) { try { t.server.close(); } catch { /* ignore */ } }
   }
   s.tunnels.clear();
+}
+
+// 关闭某会话上所有实时日志(tail -F)通道
+function closeLogs(s) {
+  if (!s || !s.logs) return;
+  for (const ch of s.logs.values()) {
+    try { ch.signal('KILL'); } catch { /* ignore */ }
+    try { ch.close(); } catch { /* ignore */ }
+  }
+  s.logs.clear();
 }
 
 // SOCKS5(仅 CONNECT,支持 IPv4 / 域名),把请求经 SSH forwardOut 出去
@@ -500,6 +622,65 @@ ipcMain.handle('tunnel:remove', (_e, { sessionId, id }) => {
   if (!s) return { ok: false };
   const t = s.tunnels.get(id);
   if (t) { if (t.server) { try { t.server.close(); } catch { /* ignore */ } } s.tunnels.delete(id); }
+  return { ok: true };
+});
+
+// ---------------------------------------------------------------------------
+// IPC:资源监控看板(按需采集一次富指标,渲染进程自行轮询)
+// ---------------------------------------------------------------------------
+ipcMain.handle('monitor:snapshot', (_e, { sessionId }) => {
+  return new Promise((resolve, reject) => {
+    const s = sessions.get(sessionId);
+    if (!s) return reject(new Error('会话不存在或已断开'));
+    const started = Date.now();
+    s.conn.exec(DASH_CMD, (err, ch) => {
+      if (err) return reject(err);
+      let out = '';
+      ch.on('data', (d) => { out += d.toString(); });
+      ch.stderr.on('data', () => { /* 忽略 */ });
+      ch.on('close', () => resolve({ raw: out, rtt: Date.now() - started, at: Date.now() }));
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// IPC:实时远程日志(tail -F),按 logId 流式推送到渲染进程
+// ---------------------------------------------------------------------------
+let logSeq = 0;
+
+ipcMain.handle('log:start', (_e, { sessionId, path: logPath, lines }) => {
+  return new Promise((resolve, reject) => {
+    const s = sessions.get(sessionId);
+    if (!s) return reject(new Error('会话不存在或已断开'));
+    if (!logPath) return reject(new Error('请提供日志文件路径'));
+    const n = Math.min(Math.max(Number(lines) || 200, 0), 5000);
+    const logId = `lg_${++logSeq}`;
+    // -F:文件被轮转(logrotate)后自动跟随新文件;退出码非 0 也只是流结束
+    const cmd = `tail -n ${n} -F ${shQuote(logPath)}`;
+    s.conn.exec(cmd, { pty: false }, (err, ch) => {
+      if (err) return reject(err);
+      s.logs.set(logId, ch);
+      ch.on('data', (d) => send('log:data', { sessionId, logId, data: d.toString('utf8') }));
+      ch.stderr.on('data', (d) => send('log:data', { sessionId, logId, data: d.toString('utf8'), stderr: true }));
+      ch.on('close', () => {
+        s.logs.delete(logId);
+        send('log:end', { sessionId, logId });
+      });
+      logger.log('实时日志开始', { sessionId, logId, path: logPath, lines: n });
+      resolve({ logId });
+    });
+  });
+});
+
+ipcMain.handle('log:stop', (_e, { sessionId, logId }) => {
+  const s = sessions.get(sessionId);
+  if (!s) return { ok: false };
+  const ch = s.logs.get(logId);
+  if (ch) {
+    try { ch.signal('KILL'); } catch { /* ignore */ }
+    try { ch.close(); } catch { /* ignore */ }
+    s.logs.delete(logId);
+  }
   return { ok: true };
 });
 

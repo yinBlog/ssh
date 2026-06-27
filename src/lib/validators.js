@@ -22,6 +22,19 @@ function validateHostConfig(host) {
     errors.push('用户名不能为空');
   }
 
+  // 跳板机(可选):一旦填了地址,则用户名与端口也需有效
+  if (host.jump && host.jump.host && host.jump.host.trim() !== '') {
+    if (!isValidHost(host.jump.host)) {
+      errors.push('跳板机地址格式无效(应为 IP 或域名)');
+    }
+    if (host.jump.port && !isValidPort(host.jump.port)) {
+      errors.push('跳板机端口号无效(应在 1-65535 之间)');
+    }
+    if (!host.jump.username || host.jump.username.trim() === '') {
+      errors.push('跳板机用户名不能为空');
+    }
+  }
+
   return {
     valid: errors.length === 0,
     errors,

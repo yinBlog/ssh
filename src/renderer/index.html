@@ -51,17 +51,34 @@
       <div id="statusbar" class="hidden">
         <span class="st-item st-state"><span class="st-dot"></span><span class="st-state-text">—</span></span>
         <span class="st-sep"></span>
+        <button id="open-dash" class="st-btn" title="服务器资源监控看板">📊 看板</button>
+        <button id="open-log" class="st-btn" title="实时远程日志(tail -F)">📜 日志</button>
         <button id="open-fm" class="st-btn" title="打开文件管理(SFTP)">📁 文件</button>
         <button id="open-tunnel" class="st-btn" title="端口转发 / SSH 隧道">🔀 隧道</button>
+        <button id="open-bcast" class="st-btn" title="批量命令广播(多台同时执行)">📡 广播</button>
         <span class="st-sep"></span>
-        <span class="st-item" title="命令往返响应时间">响应 <b id="st-rtt">—</b></span>
-        <span class="st-item" title="CPU 负载(1 分钟) / 核心数">负载 <b id="st-load">—</b></span>
-        <span class="st-item" title="已用 / 总内存">内存 <b id="st-mem">—</b></span>
-        <span class="st-item" title="根分区使用率">磁盘 <b id="st-disk">—</b></span>
-        <span class="st-item" title="服务器已运行时长">运行 <b id="st-up">—</b></span>
+        <span class="st-item st-metric" title="命令往返响应时间(终端 ↔ 服务器)">
+          <span class="st-k">响应</span><b id="st-rtt">—</b>
+        </span>
+        <span class="st-item st-metric" title="CPU 负载(1 分钟平均) / 核心数">
+          <span class="st-k">负载</span><b id="st-load">—</b><span class="st-sub" id="st-load-sub"></span>
+          <span class="st-gauge"><i id="st-load-bar"></i></span>
+        </span>
+        <span class="st-item st-metric" title="内存使用率 · 已用 / 总量">
+          <span class="st-k">内存</span><b id="st-mem">—</b><span class="st-sub" id="st-mem-sub"></span>
+          <span class="st-gauge"><i id="st-mem-bar"></i></span>
+        </span>
+        <span class="st-item st-metric" title="根分区使用率">
+          <span class="st-k">磁盘</span><b id="st-disk">—</b>
+          <span class="st-gauge"><i id="st-disk-bar"></i></span>
+        </span>
+        <span class="st-item st-metric" title="服务器已运行时长">
+          <span class="st-k">运行</span><b id="st-up">—</b>
+        </span>
         <span class="st-grow"></span>
         <span class="st-item" title="本次连接保持时长">已连接 <b id="st-dur">00:00</b></span>
         <span class="st-sep"></span>
+        <button id="st-notify" class="st-btn st-toggle" title="资源越阈值时弹桌面通知">🔔 通知</button>
         <span class="st-item" title="服务器指标采集频率">采集
           <select id="st-interval" class="st-select">
             <option value="2000">2s</option>
@@ -80,7 +97,8 @@
         <p>从左侧选择主机连接,或点击 <b>＋</b> 新增一台主机。</p>
         <div class="welcome-tags">
           <span>多标签会话</span>
-          <span>实时状态监控</span>
+          <span>资源监控看板</span>
+          <span>实时日志跟踪</span>
           <span>SFTP 文件管理</span>
           <span>断线一键重连</span>
         </div>
@@ -117,6 +135,25 @@
           <label>私钥密码(口令,可选)
             <input id="f-passphrase" type="password" placeholder="私钥若加密则填写" />
           </label>
+        </div>
+
+        <!-- 跳板机 / ProxyJump(可选) -->
+        <div class="jump-section">
+          <label class="jump-toggle">
+            <input type="checkbox" id="f-jump-enabled" /> 经跳板机连接(ProxyJump,内网穿透)
+          </label>
+          <div id="jump-fields" class="jump-fields hidden">
+            <div class="row">
+              <label class="grow">跳板机地址<input id="f-jump-host" placeholder="bastion.example.com" /></label>
+              <label class="port">端口<input id="f-jump-port" type="number" value="22" /></label>
+            </div>
+            <label>跳板机用户名<input id="f-jump-username" placeholder="ops" /></label>
+            <div class="row">
+              <label class="grow">密码<input id="f-jump-password" type="password" placeholder="留空则用下方密钥" /></label>
+              <label class="grow">私钥路径<input id="f-jump-keypath" placeholder="可选,跳板机私钥" /></label>
+            </div>
+            <label>私钥口令(可选)<input id="f-jump-passphrase" type="password" /></label>
+          </div>
         </div>
 
         <div class="modal-actions">
@@ -186,6 +223,110 @@
       <ul id="fm-list"></ul>
       <div id="fm-spinner" class="fm-spinner"></div>
       <div id="fm-status" class="fm-status"></div>
+    </div>
+  </div>
+
+  <!-- 批量命令广播 弹窗 -->
+  <div id="bcast-modal" class="hidden">
+    <div class="modal-box">
+      <h2>📡 批量命令广播</h2>
+      <p class="bc-hint">勾选目标服务器,输入命令后下发。命令会真实在所选机器执行,请谨慎。</p>
+      <ul id="bc-targets" class="bc-targets"></ul>
+      <textarea id="bc-cmd" class="bc-cmd" rows="3" spellcheck="false" placeholder="例如:sudo systemctl restart nginx(可多行,逐行执行)"></textarea>
+      <label class="bc-opt"><input type="checkbox" id="bc-enter" checked /> 末尾自动回车执行</label>
+      <div id="bc-status" class="fm-status"></div>
+      <div class="modal-actions">
+        <button type="button" id="bc-close">关闭</button>
+        <button type="button" id="bc-send">发送到选中</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 资源监控看板 弹窗 -->
+  <div id="dash-modal" class="hidden">
+    <div class="dash-box">
+      <div class="dash-head">
+        <h2>📊 资源监控看板</h2>
+        <span class="dash-host" id="dash-host">—</span>
+        <span class="st-grow"></span>
+        <span class="dash-meta" title="服务器已运行时长">运行 <b id="dash-up">—</b></span>
+        <span class="dash-meta" title="采集往返延迟">延迟 <b id="dash-rtt">—</b></span>
+        <span class="dash-meta">刷新
+          <select id="dash-interval" class="st-select">
+            <option value="2000">2s</option>
+            <option value="3000" selected>3s</option>
+            <option value="5000">5s</option>
+            <option value="10000">10s</option>
+          </select>
+        </span>
+        <button id="dash-close" class="dash-x" title="关闭">✕</button>
+      </div>
+      <div class="dash-body">
+        <div class="dash-grid">
+          <!-- CPU -->
+          <div class="card">
+            <div class="card-h"><span>CPU 使用率</span><b id="d-cpu-val">—</b></div>
+            <canvas class="spark" id="d-cpu-spark" width="300" height="46"></canvas>
+            <div class="card-f"><span id="d-cpu-cores">—</span><span id="d-cpu-load">负载 —</span></div>
+          </div>
+          <!-- 内存 -->
+          <div class="card">
+            <div class="card-h"><span>内存</span><b id="d-mem-val">—</b></div>
+            <div class="bar"><i id="d-mem-bar"></i></div>
+            <div class="card-h" style="margin-top:10px"><span>Swap</span><b id="d-swap-val">—</b></div>
+            <div class="bar"><i id="d-swap-bar"></i></div>
+          </div>
+          <!-- 网络 -->
+          <div class="card">
+            <div class="card-h"><span>网络吞吐</span><b id="d-net-val">↓— ↑—</b></div>
+            <canvas class="spark" id="d-net-spark" width="300" height="46"></canvas>
+            <div class="card-f"><span id="d-net-rx">↓ —</span><span id="d-net-tx">↑ —</span></div>
+          </div>
+          <!-- 磁盘 -->
+          <div class="card card-wide">
+            <div class="card-h"><span>磁盘分区</span><b id="d-disk-n">—</b></div>
+            <ul id="d-disk-list" class="disk-list"></ul>
+          </div>
+          <!-- Top 进程 -->
+          <div class="card card-wide">
+            <div class="card-h"><span>资源占用 Top 进程</span><b>CPU% / MEM%</b></div>
+            <ul id="d-proc-list" class="proc-list"></ul>
+          </div>
+        </div>
+      </div>
+      <div id="dash-status" class="fm-status">等待数据 …</div>
+    </div>
+  </div>
+
+  <!-- 实时日志 弹窗 -->
+  <div id="log-modal" class="hidden">
+    <div class="log-box">
+      <div class="log-head">
+        <input id="log-path" spellcheck="false" placeholder="/var/log/syslog" />
+        <select id="log-preset" class="st-select" title="常用日志">
+          <option value="">常用…</option>
+          <option value="/var/log/syslog">syslog</option>
+          <option value="/var/log/messages">messages</option>
+          <option value="/var/log/nginx/access.log">nginx access</option>
+          <option value="/var/log/nginx/error.log">nginx error</option>
+          <option value="/var/log/auth.log">auth.log</option>
+          <option value="/var/log/secure">secure</option>
+          <option value="/var/log/kern.log">kern.log(内核)</option>
+        </select>
+        <button id="log-start" class="log-go">▶ 开始</button>
+        <button id="log-stop" class="hidden">■ 停止</button>
+        <button id="log-close" class="log-x" title="关闭">✕</button>
+      </div>
+      <div class="log-toolbar">
+        <input id="log-filter" spellcheck="false" placeholder="🔍 过滤(关键字 / 高亮)" />
+        <button id="log-pause" title="暂停滚动接收">⏸ 暂停</button>
+        <button id="log-wrap" class="active" title="自动换行">↩ 换行</button>
+        <button id="log-clear" title="清空当前视图">🗑 清空</button>
+        <span class="st-grow"></span>
+        <span class="log-stat" id="log-count">0 行</span>
+      </div>
+      <div id="log-view" class="log-view wrap"></div>
+      <div id="log-status" class="fm-status">输入日志路径后点「开始」。提示:权限不足时可在终端用 sudo 调整文件可读权限。</div>
     </div>
   </div>
 
